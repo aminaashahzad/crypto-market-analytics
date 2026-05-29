@@ -1,0 +1,468 @@
+"""
+╔══════════════════════════════════════════════════════════════════╗
+║       CRYPTOCURRENCY MARKET ANALYSIS SYSTEM                     ║
+║       Data Analysis & Visualization Using Python Libraries      ║
+║       Tools: NumPy | Pandas | Matplotlib | yfinance             ║
+╚══════════════════════════════════════════════════════════════════╝
+"""
+
+# ─────────────────────────────────────────
+#  STEP 1: IMPORT LIBRARIES
+# ─────────────────────────────────────────
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+from matplotlib.dates import DateFormatter
+import yfinance as yf
+import warnings
+warnings.filterwarnings("ignore")
+
+
+# ─────────────────────────────────────────
+#  STEP 2: CONFIGURATION
+# ─────────────────────────────────────────
+COINS = {
+    "Bitcoin":  "BTC-USD",
+    "Ethereum": "ETH-USD",
+    "Dogecoin": "DOGE-USD",
+    "Solana":   "SOL-USD",
+    "BNB":      "BNB-USD"
+}
+
+COLORS = {
+    "Bitcoin":  "#F7931A",
+    "Ethereum": "#627EEA",
+    "Dogecoin": "#C2A633",
+    "Solana":   "#9945FF",
+    "BNB":      "#F3BA2F"
+}
+
+PERIOD  = "1y"       # 1 year of data
+INTERVAL = "1d"      # Daily intervals
+
+
+# ─────────────────────────────────────────
+#  STEP 3: DOWNLOAD REAL-TIME DATA
+# ─────────────────────────────────────────
+def download_data(coins: dict, period: str, interval: str) -> dict:
+    """Downloads real-time crypto data using yfinance."""
+    print("\n" + "="*60)
+    print("  CRYPTOCURRENCY MARKET ANALYSIS SYSTEM")
+    print("="*60)
+    print("\n📡 Fetching real-time data from Yahoo Finance...\n")
+
+    data = {}
+    for name, symbol in coins.items():
+        try:
+            df = yf.download(symbol, period=period, interval=interval, progress=False)
+            df.columns = [col[0] if isinstance(col, tuple) else col for col in df.columns]
+            if not df.empty:
+                data[name] = df
+                print(f"  ✅ {name:10s} ({symbol}) — {len(df)} days loaded")
+            else:
+                print(f"  ❌ {name:10s} ({symbol}) — No data returned")
+        except Exception as e:
+            print(f"  ❌ {name:10s} — Error: {e}")
+
+    print(f"\n  Total coins loaded: {len(data)}/{len(coins)}")
+    return data
+
+
+# ─────────────────────────────────────────
+#  STEP 4: DATA CLEANING
+# ─────────────────────────────────────────
+def clean_data(data: dict) -> dict:
+    """Cleans and preprocesses the downloaded data."""
+    print("\n" + "-"*60)
+    print("  DATA CLEANING & PREPROCESSING")
+    print("-"*60)
+
+    cleaned = {}
+    for name, df in data.items():
+        original_len = len(df)
+
+        # Drop rows with all NaN values
+        df = df.dropna(how="all")
+
+        # Fill minor gaps using forward fill
+        df = df.ffill()
+
+        # Ensure index is DatetimeIndex
+        df.index = pd.to_datetime(df.index)
+
+        # Sort chronologically
+        df = df.sort_index()
+
+        removed = original_len - len(df)
+        print(f"  {name:10s} — {original_len} rows → {len(df)} rows (removed {removed} nulls)")
+        cleaned[name] = df
+
+    return cleaned
+
+
+# ─────────────────────────────────────────
+#  STEP 5: STATISTICAL ANALYSIS (NumPy)
+# ─────────────────────────────────────────
+def compute_statistics(data: dict) -> pd.DataFrame:
+    """Computes statistical summaries using NumPy."""
+    print("\n" + "-"*60)
+    print("  STATISTICAL ANALYSIS")
+    print("-"*60)
+
+    records = []
+    for name, df in data.items():
+        prices = df["Close"].values.astype(float)
+
+        # Daily returns
+        returns = np.diff(prices) / prices[:-1] * 100
+
+        record = {
+            "Coin":             name,
+            "Current Price ($)":round(float(prices[-1]), 2),
+            "Mean Price ($)":   round(float(np.mean(prices)), 2),
+            "Median Price ($)": round(float(np.median(prices)), 2),
+            "Std Dev ($)":      round(float(np.std(prices)), 2),
+            "Min Price ($)":    round(float(np.min(prices)), 2),
+            "Max Price ($)":    round(float(np.max(prices)), 2),
+            "Avg Daily Return %": round(float(np.mean(returns)), 4),
+            "Volatility %":     round(float(np.std(returns)), 4),
+            "Total Return %":   round(float((prices[-1] - prices[0]) / prices[0] * 100), 2),
+            "Sharpe Ratio":     round(float(np.mean(returns) / np.std(returns)) if np.std(returns) != 0 else 0, 4),
+        }
+        records.append(record)
+
+    stats_df = pd.DataFrame(records).set_index("Coin")
+
+    print("\n  Full Statistics Table:")
+    print(stats_df.to_string())
+    return stats_df
+
+
+# ─────────────────────────────────────────
+#  STEP 6: FEATURE ENGINEERING (Pandas)
+# ─────────────────────────────────────────
+def add_features(data: dict) -> dict:
+    """Adds moving averages, daily returns, and volatility using Pandas."""
+    for name, df in data.items():
+        df = df.copy()
+        df["Daily_Return"]   = df["Close"].pct_change() * 100
+        df["MA_7"]           = df["Close"].rolling(window=7).mean()
+        df["MA_30"]          = df["Close"].rolling(window=30).mean()
+        df["Volatility_30"]  = df["Daily_Return"].rolling(window=30).std()
+        df["Cum_Return"]     = (1 + df["Daily_Return"] / 100).cumprod() - 1
+        data[name] = df
+    return data
+
+
+# ─────────────────────────────────────────
+#  STEP 7: VISUALIZATION (Matplotlib)
+# ─────────────────────────────────────────
+def plot_price_trends(data: dict, colors: dict):
+    """Chart 1 — Price trends with moving averages."""
+    n = len(data)
+    fig, axes = plt.subplots(n, 1, figsize=(14, 4 * n))
+    fig.suptitle("Cryptocurrency Price Trends with Moving Averages (1 Year)",
+                 fontsize=16, fontweight="bold", y=1.01)
+
+    if n == 1:
+        axes = [axes]
+
+    for ax, (name, df) in zip(axes, data.items()):
+        color = colors.get(name, "#ffffff")
+        ax.plot(df.index, df["Close"], color=color,      linewidth=1.5, label="Close Price", alpha=0.9)
+        ax.plot(df.index, df["MA_7"],  color="white",    linewidth=1,   linestyle="--", label="7-Day MA", alpha=0.7)
+        ax.plot(df.index, df["MA_30"], color="lightgray",linewidth=1.5, linestyle="-.", label="30-Day MA", alpha=0.8)
+
+        ax.fill_between(df.index, df["Close"], alpha=0.1, color=color)
+        ax.set_facecolor("#0d0d0d")
+        ax.set_title(f"{name}", fontsize=13, fontweight="bold", color=color)
+        ax.set_ylabel("Price (USD)", fontsize=10)
+        ax.legend(loc="upper left", fontsize=9)
+        ax.grid(True, alpha=0.2, color="gray")
+        ax.xaxis.set_major_formatter(DateFormatter("%b %Y"))
+
+    fig.patch.set_facecolor("#1a1a1a")
+    for ax in axes:
+        ax.tick_params(colors="white")
+        ax.yaxis.label.set_color("white")
+        ax.title.set_color(ax.title.get_color())
+        ax.spines["bottom"].set_color("gray")
+        ax.spines["left"].set_color("gray")
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+
+    plt.tight_layout()
+    plt.savefig("chart1_price_trends.png", dpi=150, bbox_inches="tight", facecolor="#1a1a1a")
+    plt.show()
+    print("  ✅ Chart 1 saved: chart1_price_trends.png")
+
+
+def plot_daily_returns(data: dict, colors: dict):
+    """Chart 2 — Daily returns comparison."""
+    fig, axes = plt.subplots(len(data), 1, figsize=(14, 3 * len(data)))
+    fig.suptitle("Daily Returns (%) — Volatility Overview", fontsize=16, fontweight="bold")
+
+    if len(data) == 1:
+        axes = [axes]
+
+    for ax, (name, df) in zip(axes, data.items()):
+        color = colors.get(name, "cyan")
+        returns = df["Daily_Return"].dropna()
+        pos = returns[returns >= 0]
+        neg = returns[returns < 0]
+
+        ax.bar(pos.index, pos.values, color=color,   alpha=0.8, width=1)
+        ax.bar(neg.index, neg.values, color="#ff4444", alpha=0.8, width=1)
+        ax.axhline(0, color="white", linewidth=0.8, linestyle="--")
+        ax.set_facecolor("#0d0d0d")
+        ax.set_title(f"{name} — Daily Returns", fontsize=11, fontweight="bold", color=color)
+        ax.set_ylabel("Return %", fontsize=9)
+        ax.grid(True, alpha=0.15)
+        ax.xaxis.set_major_formatter(DateFormatter("%b %Y"))
+
+    fig.patch.set_facecolor("#1a1a1a")
+    for ax in axes:
+        ax.tick_params(colors="white")
+        ax.yaxis.label.set_color("white")
+        ax.spines["bottom"].set_color("gray")
+        ax.spines["left"].set_color("gray")
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+
+    plt.tight_layout()
+    plt.savefig("chart2_daily_returns.png", dpi=150, bbox_inches="tight", facecolor="#1a1a1a")
+    plt.show()
+    print("  ✅ Chart 2 saved: chart2_daily_returns.png")
+
+
+def plot_cumulative_returns(data: dict, colors: dict):
+    """Chart 3 — Cumulative return comparison (all coins on one chart)."""
+    fig, ax = plt.subplots(figsize=(14, 6))
+    fig.patch.set_facecolor("#1a1a1a")
+    ax.set_facecolor("#0d0d0d")
+
+    for name, df in data.items():
+        cum = df["Cum_Return"].dropna() * 100
+        ax.plot(cum.index, cum.values,
+                color=colors.get(name, "white"),
+                linewidth=2, label=name)
+
+    ax.axhline(0, color="white", linewidth=0.8, linestyle="--", alpha=0.5)
+    ax.set_title("Cumulative Returns Comparison (%) — 1 Year", fontsize=15, fontweight="bold", color="white")
+    ax.set_ylabel("Cumulative Return (%)", fontsize=11, color="white")
+    ax.set_xlabel("Date", fontsize=11, color="white")
+    ax.legend(fontsize=11, facecolor="#1a1a1a", labelcolor="white")
+    ax.grid(True, alpha=0.2, color="gray")
+    ax.tick_params(colors="white")
+    ax.xaxis.set_major_formatter(DateFormatter("%b %Y"))
+    ax.spines["bottom"].set_color("gray")
+    ax.spines["left"].set_color("gray")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    plt.tight_layout()
+    plt.savefig("chart3_cumulative_returns.png", dpi=150, bbox_inches="tight", facecolor="#1a1a1a")
+    plt.show()
+    print("  ✅ Chart 3 saved: chart3_cumulative_returns.png")
+
+
+def plot_volatility(data: dict, colors: dict):
+    """Chart 4 — 30-day rolling volatility."""
+    fig, ax = plt.subplots(figsize=(14, 6))
+    fig.patch.set_facecolor("#1a1a1a")
+    ax.set_facecolor("#0d0d0d")
+
+    for name, df in data.items():
+        vol = df["Volatility_30"].dropna()
+        ax.plot(vol.index, vol.values,
+                color=colors.get(name, "white"),
+                linewidth=2, label=name)
+
+    ax.set_title("30-Day Rolling Volatility (%)", fontsize=15, fontweight="bold", color="white")
+    ax.set_ylabel("Volatility (Std Dev of Daily Return %)", fontsize=11, color="white")
+    ax.set_xlabel("Date", fontsize=11, color="white")
+    ax.legend(fontsize=11, facecolor="#1a1a1a", labelcolor="white")
+    ax.grid(True, alpha=0.2, color="gray")
+    ax.tick_params(colors="white")
+    ax.xaxis.set_major_formatter(DateFormatter("%b %Y"))
+    ax.spines["bottom"].set_color("gray")
+    ax.spines["left"].set_color("gray")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    plt.tight_layout()
+    plt.savefig("chart4_volatility.png", dpi=150, bbox_inches="tight", facecolor="#1a1a1a")
+    plt.show()
+    print("  ✅ Chart 4 saved: chart4_volatility.png")
+
+
+def plot_correlation_heatmap(data: dict):
+    """Chart 5 — Correlation heatmap between coins."""
+    # Build a combined returns DataFrame
+    returns_df = pd.DataFrame()
+    for name, df in data.items():
+        returns_df[name] = df["Daily_Return"]
+
+    corr = returns_df.corr()
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    fig.patch.set_facecolor("#1a1a1a")
+    ax.set_facecolor("#0d0d0d")
+
+    coins_list = corr.columns.tolist()
+    n = len(coins_list)
+    im = ax.imshow(corr.values, cmap="RdYlGn", vmin=-1, vmax=1, aspect="auto")
+
+    ax.set_xticks(range(n))
+    ax.set_yticks(range(n))
+    ax.set_xticklabels(coins_list, rotation=45, ha="right", color="white", fontsize=10)
+    ax.set_yticklabels(coins_list, color="white", fontsize=10)
+
+    for i in range(n):
+        for j in range(n):
+            ax.text(j, i, f"{corr.values[i, j]:.2f}",
+                    ha="center", va="center",
+                    color="black", fontsize=11, fontweight="bold")
+
+    plt.colorbar(im, ax=ax, label="Correlation")
+    ax.set_title("Correlation Heatmap — Daily Returns", fontsize=14, fontweight="bold", color="white", pad=15)
+
+    plt.tight_layout()
+    plt.savefig("chart5_correlation_heatmap.png", dpi=150, bbox_inches="tight", facecolor="#1a1a1a")
+    plt.show()
+    print("  ✅ Chart 5 saved: chart5_correlation_heatmap.png")
+
+
+def plot_performance_bar(stats_df: pd.DataFrame, colors: dict):
+    """Chart 6 — Total return % bar chart."""
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    fig.patch.set_facecolor("#1a1a1a")
+
+    coins  = stats_df.index.tolist()
+    clrs   = [colors.get(c, "#aaaaaa") for c in coins]
+    total_returns = stats_df["Total Return %"].values
+    volatilities  = stats_df["Volatility %"].values
+
+    # Bar 1 — Total Return
+    ax1 = axes[0]
+    ax1.set_facecolor("#0d0d0d")
+    bars = ax1.bar(coins, total_returns, color=clrs, edgecolor="white", linewidth=0.5)
+    ax1.axhline(0, color="white", linewidth=0.8, linestyle="--")
+    ax1.set_title("Total Return % (1 Year)", fontsize=13, fontweight="bold", color="white")
+    ax1.set_ylabel("Return %", color="white")
+    ax1.tick_params(colors="white")
+    ax1.spines["bottom"].set_color("gray")
+    ax1.spines["left"].set_color("gray")
+    ax1.spines["top"].set_visible(False)
+    ax1.spines["right"].set_visible(False)
+    for bar, val in zip(bars, total_returns):
+        ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height() + (1 if val >= 0 else -3),
+                 f"{val:.1f}%", ha="center", va="bottom", color="white", fontsize=9, fontweight="bold")
+
+    # Bar 2 — Volatility
+    ax2 = axes[1]
+    ax2.set_facecolor("#0d0d0d")
+    ax2.bar(coins, volatilities, color=clrs, edgecolor="white", linewidth=0.5)
+    ax2.set_title("Volatility % (Daily Std Dev)", fontsize=13, fontweight="bold", color="white")
+    ax2.set_ylabel("Volatility %", color="white")
+    ax2.tick_params(colors="white")
+    ax2.spines["bottom"].set_color("gray")
+    ax2.spines["left"].set_color("gray")
+    ax2.spines["top"].set_visible(False)
+    ax2.spines["right"].set_visible(False)
+
+    plt.tight_layout()
+    plt.savefig("chart6_performance_bar.png", dpi=150, bbox_inches="tight", facecolor="#1a1a1a")
+    plt.show()
+    print("  ✅ Chart 6 saved: chart6_performance_bar.png")
+
+
+# ─────────────────────────────────────────
+#  STEP 8: REPORT GENERATION
+# ─────────────────────────────────────────
+def generate_report(stats_df: pd.DataFrame):
+    """Generates a text report summarizing the analysis."""
+    print("\n" + "="*60)
+    print("  FINAL REPORT — CRYPTOCURRENCY ANALYSIS SUMMARY")
+    print("="*60)
+
+    best_return   = stats_df["Total Return %"].idxmax()
+    worst_return  = stats_df["Total Return %"].idxmin()
+    most_volatile = stats_df["Volatility %"].idxmax()
+    least_volatile= stats_df["Volatility %"].idxmin()
+    best_sharpe   = stats_df["Sharpe Ratio"].idxmax()
+
+    print(f"""
+  📈 Best Performing Coin   : {best_return}
+                              ({stats_df.loc[best_return, 'Total Return %']:+.2f}% return)
+
+  📉 Worst Performing Coin  : {worst_return}
+                              ({stats_df.loc[worst_return, 'Total Return %']:+.2f}% return)
+
+  🌊 Most Volatile Coin     : {most_volatile}
+                              ({stats_df.loc[most_volatile, 'Volatility %']:.4f}% daily volatility)
+
+  🧘 Least Volatile Coin    : {least_volatile}
+                              ({stats_df.loc[least_volatile, 'Volatility %']:.4f}% daily volatility)
+
+  🏆 Best Risk-Adjusted Coin: {best_sharpe}
+                              (Sharpe Ratio: {stats_df.loc[best_sharpe, 'Sharpe Ratio']:.4f})
+    """)
+
+    print("  CURRENT PRICES:")
+    for coin, row in stats_df.iterrows():
+        print(f"    {coin:10s} → ${row['Current Price ($)']:>12,.2f}")
+
+    print("\n" + "="*60)
+    print("  Charts saved to current directory:")
+    for i, name in enumerate([
+        "Price Trends with Moving Averages",
+        "Daily Returns",
+        "Cumulative Returns Comparison",
+        "30-Day Rolling Volatility",
+        "Correlation Heatmap",
+        "Performance Bar Charts"
+    ], 1):
+        print(f"    chart{i}_{name.lower().replace(' ', '_')}.png")
+    print("="*60)
+    print("\n  ✅ Analysis Complete!")
+
+
+# ─────────────────────────────────────────
+#  MAIN — RUN ALL STEPS
+# ─────────────────────────────────────────
+def main():
+    # Step 1: Download
+    raw_data = download_data(COINS, PERIOD, INTERVAL)
+
+    if not raw_data:
+        print("❌ No data downloaded. Check internet connection.")
+        return
+
+    # Step 2: Clean
+    clean = clean_data(raw_data)
+
+    # Step 3: Statistics
+    stats_df = compute_statistics(clean)
+
+    # Step 4: Features
+    featured = add_features(clean)
+
+    # Step 5: Visualizations
+    print("\n" + "-"*60)
+    print("  GENERATING VISUALIZATIONS")
+    print("-"*60)
+    plot_price_trends(featured, COLORS)
+    plot_daily_returns(featured, COLORS)
+    plot_cumulative_returns(featured, COLORS)
+    plot_volatility(featured, COLORS)
+    plot_correlation_heatmap(featured)
+    plot_performance_bar(stats_df, COLORS)
+
+    # Step 6: Report
+    generate_report(stats_df)
+
+
+if __name__ == "__main__":
+    main()

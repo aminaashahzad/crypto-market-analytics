@@ -1,0 +1,28 @@
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background-color: #0b070f;
+  color: #ffb6c1;
+  font-family: 'Courier New', Courier, monospace;
+}
+
+.glow-magenta {
+  color: #ff00ff !important;
+  text-shadow: 0 0 10px rgba(255, 0, 255, 0.7);
+}
+
+.crypto-card {
+  background: #140d1a;
+  border: 1px solid #da70d6;
+  border-radius: 12px;
+  box-shadow: 0 0 15px rgba(218, 112, 214, 0.15);
+  transition: all 0.3s ease;
+}
+
+.crypto-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 0 20px rgba(255, 0, 255, 0.3);
+  border-color: #ff00ff;
+}

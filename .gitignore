@@ -1,0 +1,14 @@
+# Ignore local Python environment packages
+backend/venv/
+backend/__pycache__/
+backend/*.pyc
+backend/*_historical_data.csv
+
+# Ignore React development node environment packages
+frontend/node_modules/
+frontend/dist/
+
+# Ignore system configuration profiles
+.env
+.DS_Store
+Thumbs.db

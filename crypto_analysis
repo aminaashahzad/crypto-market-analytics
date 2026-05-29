@@ -1,0 +1,219 @@
+import os
+import warnings
+import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
+import pandas as pd
+import yfinance as yf
+
+warnings.filterwarnings("ignore")
+
+# ==========================================
+# STEP 1: CONFIGURATION 
+# ==========================================
+COINS = {
+    "Bitcoin": "BTC-USD",
+    "Ethereum": "ETH-USD",
+    "Dogecoin": "DOGE-USD",
+    "Solana": "SOL-USD",
+    "BNB": "BNB-USD",
+}
+
+COLORS = {
+    "Bitcoin": "#FF1493",    # Deep Hot Pink
+    "Ethereum": "#DA70D6",   # Orchid Purple
+    "Dogecoin": "#FFB6C1",   # Sweet Rose Pink
+    "Solana": "#FF00FF",     # Electric Magenta
+    "BNB": "#8A2BE2"         # Neon Violet
+}
+
+PERIOD = "5y"
+
+# styling for all charts
+plt.style.use("dark_background")
+plt.rcParams.update({
+    "figure.facecolor": "#120a14",
+    "axes.facecolor": "#08030a",
+    "axes.edgecolor": "#DA70D6",
+    "grid.color": "#DA70D6",
+    "grid.alpha": 0.15,
+    "text.color": "#FFB6C1",
+    "axes.labelcolor": "#FFB6C1",
+    "xtick.color": "#FFB6C1",
+    "ytick.color": "#FFB6C1",
+})
+
+
+# ==========================================
+# STEP 2: DATA MANAGEMENT & CLEANING
+# ==========================================
+def load_and_clean_data(coins: dict, period: str) -> dict:
+    """Downloads fresh market streams, saves to local CSVs, and imports them."""
+    print(f"\n{'='*60}\nDATA IMPORT & STORAGE MANAGEMENT\n{'='*60}")
+    data = {}
+    
+    for name, symbol in coins.items():
+        csv_filename = f"{name.lower()}_historical_data.csv"
+        
+        if not os.path.exists(csv_filename):
+            df_raw = yf.download(symbol, period=period, interval="1d", progress=False)
+            if isinstance(df_raw.columns, pd.MultiIndex):
+                df_raw.columns = [col[0] for col in df_raw.columns]
+            if not df_raw.empty:
+                df_raw.to_csv(csv_filename)
+        
+        # IMPORT FROM FILE requirement met
+        df = pd.read_csv(csv_filename, index_col=0, parse_dates=True)
+        
+        # DATA CLEANING & PREPROCESSING
+        df = df.dropna(how="all").ffill()
+        df.index = pd.to_datetime(df.index)
+        
+        # FEATURE ENGINEERING
+        df["Daily_Return"] = df["Close"].pct_change() * 100
+        df["MA_30"] = df["Close"].rolling(window=30).mean()
+        
+        data[name] = df.sort_index()
+        print(f" ✓ Managed & Loaded File: {csv_filename} ({len(df)} rows)")
+
+    return data
+
+
+def compute_statistics(data: dict) -> pd.DataFrame:
+    """Computes basic performance metrics for the final summary and bar chart."""
+    records = []
+    for name, df in data.items():
+        close_prices = df["Close"].astype(float)
+        returns = df["Daily_Return"].dropna()
+        
+        p_start, p_end = close_prices.iloc[0], close_prices.iloc[-1]
+
+        records.append({
+            "Coin": name,
+            "Current Price ($)": round(p_end, 2),
+            "Mean Price ($)": round(close_prices.mean(), 2),
+            "Volatility %": round(returns.std(), 4),
+            "Total Return %": round(((p_end - p_start) / p_start) * 100, 2),
+        })
+    return pd.DataFrame(records).set_index("Coin")
+
+
+# ==========================================
+# STEP 3: VISUALIZATIONS 
+# ==========================================
+def format_chart(ax):
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+
+# CHART 1: Price trends comparison (Logarithmic scale)
+def plot_price_trends(data: dict, colors: dict):
+    fig, ax = plt.subplots(figsize=(12, 6))
+    
+    for name, df in data.items():
+        clr = colors.get(name, "#ffffff")
+        ax.plot(df.index, df["Close"], color=clr, linewidth=1.5, label=name)
+        ax.fill_between(df.index, df["Close"].astype(float), alpha=0.02, color=clr)
+
+    ax.set_title(f"Cryptocurrency Historical Price Comparison ({PERIOD})", fontsize=13, fontweight="bold", color="#FF00FF")
+    ax.set_ylabel("USD Price ($)")
+    ax.set_yscale("log")
+    ax.legend(loc="upper left")
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
+    format_chart(ax)
+    plt.tight_layout()
+    plt.show()
+
+
+# CHART 2: Total Return Performance Bar Chart
+def plot_performance_bar(stats_df: pd.DataFrame, colors: dict):
+    fig, ax = plt.subplots(figsize=(11, 5))
+    coins = stats_df.index.tolist()
+    clrs = [colors.get(c, "#aaaaaa") for c in coins]
+
+    bars = ax.bar(coins, stats_df["Total Return %"], color=clrs, edgecolor="#DA70D6", linewidth=0.8)
+    ax.axhline(0, color="white", linewidth=0.8, linestyle="--")
+    
+    ax.set_title(f"Total Investment Return Breakdown ({PERIOD})", fontsize=13, fontweight="bold", color="#FF00FF")
+    ax.set_ylabel("Total Profit / Loss (%)")
+    format_chart(ax)
+
+    for bar in bars:
+        yval = bar.get_height()
+        va_dir = "bottom" if yval >= 0 else "top"
+        ax.text(bar.get_x() + bar.get_width() / 2, yval, f"{yval:+.1f}%", 
+                ha="center", va=va_dir, fontsize=10, color='white', fontweight='bold')
+
+    plt.tight_layout()
+    plt.show()
+
+
+# CHART 3: Matrix Correlation Heatmap
+def plot_correlation_heatmap(data: dict):
+    returns_df = pd.DataFrame({name: df["Daily_Return"] for name, df in data.items()})
+    corr = returns_df.corr()
+
+    fig, ax = plt.subplots(figsize=(7, 5))
+    im = ax.imshow(corr.values, cmap="PuRd", vmin=-1, vmax=1)
+
+    n = len(corr.columns)
+    ax.set_xticks(range(n))
+    ax.set_yticks(range(n))
+    ax.set_xticklabels(corr.columns, rotation=45, ha="right")
+    ax.set_yticklabels(corr.columns)
+
+    for i in range(n):
+        for j in range(n):
+            ax.text(j, i, f"{corr.values[i, j]:.2f}", ha="center", va="center", color="black", fontweight="bold")
+
+    plt.colorbar(im, ax=ax, label="Correlation Strength")
+    ax.set_title("Asset Correlation Matrix: Daily Returns", fontsize=13, fontweight="bold", color="#FF00FF")
+    plt.tight_layout()
+    plt.show()
+
+
+# ==========================================
+# STEP 4: EXECUTIVE SUMMARY REPORT
+# ==========================================
+def generate_report(stats_df: pd.DataFrame):
+    """Generates the required data interpretation summary."""
+    print(f"\n{'='*60}\n EXECUTIVE REPORT | MARKET INTERPRETATION SUMMARY\n{'='*60}")
+    
+    # Dynamically extract best and worst historical returns using Pandas
+    best_coin = stats_df["Total Return %"].idxmax()
+    worst_coin = stats_df["Total Return %"].idxmin()
+    
+    best_return = stats_df.loc[best_coin, "Total Return %"]
+    worst_return = stats_df.loc[worst_coin, "Total Return %"]
+
+    print(f"🏆 BEST PERFORMING ASSET : {best_coin} ({best_return:+.2f}%)")
+    print(f"⚠️ WORST PERFORMING ASSET: {worst_coin} ({worst_return:+.2f}%)")
+    print("-" * 60)
+    
+    print("CURRENT LIVE STANDING VALUATIONS:")
+    for coin, row in stats_df.iterrows():
+        print(f"  * {coin:10s} -> Current Price: ${row['Current Price ($)']:>12,.2f} | Volatility: {row['Volatility %']:.2f}%")
+        
+    print(f"{'='*60}\nPipeline Analysis Complete! Ready for Submission.")
+
+
+def main():
+    # 1. Run file loading operations
+    cleaned_data = load_and_clean_data(COINS, PERIOD)
+    
+    # 2. Run structural analysis statistics
+    stats_df = compute_statistics(cleaned_data)
+    print("\n" + "-"*40 + "\nSTATISTICAL DATA MATRIX SUMMARY\n" + "-"*40)
+    print(stats_df.to_string())
+
+    # 3. Present the simplified pink charts sequentially
+    print("\nLaunching visualization sequence...")
+    plot_price_trends(cleaned_data, COLORS)
+    plot_performance_bar(stats_df, COLORS)
+    plot_correlation_heatmap(cleaned_data)
+
+    # 4. Generate the required final data insights report
+    generate_report(stats_df)
+
+
+if __name__ == "__main__":
+    main()
